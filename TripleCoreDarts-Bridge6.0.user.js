@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         TripleCore Auto Lobby Creator FINAL Bridge6.0
+// @name         TripleCore Auto Lobby Creator FINAL Bridge6.4
 // @namespace    triplecore
-// @version      6.0
+// @version      6.4
 // @match        *://play.autodarts.io/*
 // @grant        none
 // ==/UserScript==
@@ -11,24 +11,29 @@
 
     const TRIPLECORE_API_BASE = 'https://api.triplecore.community';
     const AUTODARTS_API_BASE = 'https://api.autodarts.io/gs/v0';
+
     const POLL_INTERVAL_MS = 4000;
     const LOBBY_SYNC_INTERVAL_MS = 5000;
     const RESULT_SCAN_INTERVAL_MS = 3000;
+    const ROUTE_CHECK_INTERVAL_MS = 1000;
     const AUTO_SEND_RESULTS = true;
+
+    const CLIENT_STORAGE_KEY = 'triplecore_client_id';
+    const SENT_RESULTS_KEY = 'triplecore_sent_results_v1';
+    const LAST_JOB_CONTEXT_KEY = 'triplecore_last_job_context_v3';
 
     let authToken = null;
     let currentOpenJob = null;
     let cachedJoinPayload = null;
     let lastHandledJobId = null;
     let processingJob = false;
-    let syncedLobbyId = null;
 
     let badgeEl = null;
     let buttonEl = null;
     let resultButtonEl = null;
 
-    const CLIENT_STORAGE_KEY = 'triplecore_client_id';
-    const SENT_RESULTS_KEY = 'triplecore_sent_results_v1';
+    let started = false;
+    let lastSeenPath = location.pathname + location.search + location.hash;
 
     function getClientId() {
         let id = localStorage.getItem(CLIENT_STORAGE_KEY);
@@ -58,6 +63,34 @@
         return !!map[matchId];
     }
 
+    function saveLastJobContext(context) {
+        localStorage.setItem(LAST_JOB_CONTEXT_KEY, JSON.stringify({
+            ...context,
+            updated_at: new Date().toISOString()
+        }));
+    }
+
+    function getLastJobContext() {
+        try {
+            const parsed = JSON.parse(localStorage.getItem(LAST_JOB_CONTEXT_KEY) || '{}');
+            if (!parsed || !parsed.job_id) return null;
+
+            const updatedAt = parsed.updated_at ? new Date(parsed.updated_at).getTime() : 0;
+            const maxAgeMs = 12 * 60 * 60 * 1000;
+            if (!updatedAt || (Date.now() - updatedAt) > maxAgeMs) {
+                return null;
+            }
+
+            return parsed;
+        } catch {
+            return null;
+        }
+    }
+
+    function clearLastJobContext() {
+        localStorage.removeItem(LAST_JOB_CONTEXT_KEY);
+    }
+
     const clientId = getClientId();
 
     function log(...args) {
@@ -85,12 +118,22 @@
         return !!(currentOpenJob && currentOpenJob.id && currentOpenJob.settings);
     }
 
+    function isActiveMatchPage() {
+        return /\/matches\/[a-zA-Z0-9-]+/i.test(window.location.pathname);
+    }
+
+    function isBusyInActiveMatch() {
+        return isActiveMatchPage();
+    }
+
     function updateStatusBadge() {
         if (!badgeEl) return;
 
         const tokenState = hasToken() ? 'Token ✅' : 'Token ❌';
         const jobState = hasOpenJob() ? 'Job ✅' : 'Job ❌';
-        const busyState = processingJob ? 'Erstellt…' : 'Idle';
+        const busyState = isBusyInActiveMatch()
+            ? 'Im aktiven Match'
+            : (processingJob ? 'Erstellt…' : 'Idle');
 
         badgeEl.textContent = `TripleCore Bridge aktiv — ${tokenState} • ${jobState} • ${busyState}`;
     }
@@ -110,6 +153,9 @@
     }
 
     function installTokenHook() {
+        if (window.__triplecore_xhr_hook_installed) return;
+        window.__triplecore_xhr_hook_installed = true;
+
         const OriginalXHR = window.XMLHttpRequest;
 
         function PatchedXHR() {
@@ -122,18 +168,20 @@
             const originalOpen = xhr.open;
             xhr.open = function (method, url, ...rest) {
                 requestMethod = method;
-                requestUrl = url;
+                requestUrl = String(url || '');
                 return originalOpen.call(this, method, url, ...rest);
             };
 
             const originalSetHeader = xhr.setRequestHeader;
             xhr.setRequestHeader = function (key, value) {
+                const lowerKey = String(key).toLowerCase();
+                const isAutodartsRequest = requestUrl.includes('api.autodarts.io');
                 if (
-                    String(key).toLowerCase() === 'authorization' &&
-                    String(value).includes('Bearer ')
+                    isAutodartsRequest &&
+                    lowerKey === 'authorization' &&
+                    String(value).startsWith('Bearer ')
                 ) {
                     authToken = String(value).replace('Bearer ', '').trim();
-                    log('✅ Token abgegriffen');
                     updateStatusBadge();
                 }
                 return originalSetHeader.apply(this, arguments);
@@ -145,15 +193,20 @@
 
                 xhr.addEventListener('load', function () {
                     try {
+                        const isAutodartsRequest = requestUrl.includes('/gs/v0/lobbies/');
                         if (
+                            isAutodartsRequest &&
                             requestMethod === 'POST' &&
                             /\/gs\/v0\/lobbies\/[^/]+\/players/.test(requestUrl) &&
                             requestBody
                         ) {
                             const parsed = safeJsonParse(requestBody);
                             if (parsed && parsed.userId && parsed.boardId) {
-                                cachedJoinPayload = parsed;
-                                log('Join-Payload gecached:', cachedJoinPayload);
+                                cachedJoinPayload = {
+                                    userId: parsed.userId,
+                                    boardId: parsed.boardId,
+                                    captured_at: new Date().toISOString()
+                                };
                             }
                         }
                     } catch (err) {
@@ -173,9 +226,7 @@
     async function triplecoreGet(path) {
         const response = await fetch(`${TRIPLECORE_API_BASE}${path}`, {
             method: 'GET',
-            headers: {
-                'Content-Type': 'application/json'
-            }
+            credentials: 'omit'
         });
 
         if (!response.ok) {
@@ -191,6 +242,7 @@
             headers: {
                 'Content-Type': 'application/json'
             },
+            credentials: 'omit',
             body: JSON.stringify(data)
         });
 
@@ -231,7 +283,6 @@
         }
 
         const payload = mapSettingsToAutodartsPayload(settings);
-        log('Erstelle Lobby via API...', payload);
 
         const response = await fetch(`${AUTODARTS_API_BASE}/lobbies`, {
             method: 'POST',
@@ -248,9 +299,7 @@
             throw new Error(`Autodarts Lobby API Fehler ${response.status}: ${text}`);
         }
 
-        const data = await response.json();
-        log('✅ Lobby erstellt:', data);
-        return data;
+        return await response.json();
     }
 
     async function fetchLobbyData(lobbyId) {
@@ -297,8 +346,8 @@
             throw new Error('Kein Auth-Token für Join verfügbar');
         }
 
-        if (!cachedJoinPayload) {
-            log('Kein gecachter Join-Payload vorhanden — Join wird übersprungen');
+        if (!cachedJoinPayload || !cachedJoinPayload.userId || !cachedJoinPayload.boardId) {
+            log('Kein gültiger Join-Payload vorhanden — Join wird übersprungen');
             return;
         }
 
@@ -309,7 +358,10 @@
                 'Authorization': `Bearer ${authToken}`,
                 'Accept': 'application/json, text/plain, */*'
             },
-            body: JSON.stringify(cachedJoinPayload)
+            body: JSON.stringify({
+                userId: cachedJoinPayload.userId,
+                boardId: cachedJoinPayload.boardId
+            })
         });
 
         if (!response.ok) {
@@ -317,10 +369,16 @@
             throw new Error(`Autodarts Player-Join Fehler ${response.status}: ${text}`);
         }
 
-        log('✅ Host zur Lobby hinzugefügt');
+        cachedJoinPayload = null;
     }
 
     async function loadNextJob() {
+        if (isBusyInActiveMatch()) {
+            currentOpenJob = null;
+            updateStatusBadge();
+            return;
+        }
+
         try {
             const job = await triplecoreGet('/api/jobs/next');
 
@@ -330,9 +388,8 @@
                 return;
             }
 
-            if (job.status === 'open') {
+            if (job.status === 'open' && job.id && job.settings) {
                 currentOpenJob = job;
-                log('Offener Job gespeichert:', job);
                 updateStatusBadge();
             }
         } catch (err) {
@@ -380,10 +437,13 @@
                 status: status
             });
 
-            syncedLobbyId = lobbyId;
-            log(`Lobby-Sync: ${lobbyId} → ${status} (${playerCount}/${maxPlayers})`);
+            saveLastJobContext({
+                job_id: job.id,
+                lobby_id: lobbyId,
+                job_type: job.job_type || 'lfg'
+            });
         } catch (err) {
-            // Unbekannte Lobby ist okay
+            // unbekannte Lobby ist okay
         }
     }
 
@@ -391,6 +451,7 @@
         if (processingJob) return false;
         if (!job || !job.id || !job.settings) return false;
         if (lastHandledJobId === job.id) return false;
+        if (isBusyInActiveMatch()) return false;
 
         if (!authToken) {
             log('Noch kein Auth-Token verfügbar');
@@ -399,7 +460,6 @@
         }
 
         if (job.lobby_id || job.invite || (job.status && job.status !== 'open')) {
-            log('Job hat bereits eine Lobby oder ist nicht mehr offen:', job.id);
             lastHandledJobId = job.id;
             return false;
         }
@@ -408,15 +468,14 @@
         updateStatusBadge();
 
         try {
-            log(`Starte Verarbeitung (${source}) für Job:`, job);
-
             const claimResult = await claimJob(job);
             if (!claimResult.claimed) {
-                log('Job konnte nicht geclaimt werden:', claimResult.reason);
                 return false;
             }
 
-            const lobby = await createLobbyViaAutodartsApi(job.settings);
+            const claimedJob = claimResult.job || job;
+
+            const lobby = await createLobbyViaAutodartsApi(claimedJob.settings);
 
             if (!lobby || !lobby.id) {
                 throw new Error('Keine Lobby-ID in der Antwort erhalten');
@@ -429,21 +488,25 @@
             }
 
             const freshLobbyData = await fetchLobbyData(lobby.id);
-            await attachLobbyToJob(job.id, freshLobbyData);
+            await attachLobbyToJob(claimedJob.id, freshLobbyData);
 
             const inviteUrl = `https://play.autodarts.io/lobbies/${lobby.id}`;
 
-            await triplecorePost(`/api/jobs/${job.id}/invite`, {
+            await triplecorePost(`/api/jobs/${claimedJob.id}/invite`, {
                 invite: inviteUrl
             });
 
-            await triplecorePost(`/api/jobs/${job.id}/status`, {
+            await triplecorePost(`/api/jobs/${claimedJob.id}/status`, {
                 status: 'ready'
             });
 
-            log('✅ Invite zurück an TripleCore gesendet:', inviteUrl);
+            saveLastJobContext({
+                job_id: claimedJob.id,
+                lobby_id: lobby.id,
+                job_type: claimedJob.job_type || 'lfg'
+            });
 
-            lastHandledJobId = job.id;
+            lastHandledJobId = claimedJob.id;
             currentOpenJob = null;
             updateStatusBadge();
 
@@ -456,7 +519,6 @@
                 await triplecorePost(`/api/jobs/${job.id}/status`, {
                     status: 'open'
                 });
-                log('Job-Status auf open zurückgesetzt');
             } catch (rollbackErr) {
                 console.error('[TRIPLECORE] Fehler beim Status-Rollback:', rollbackErr);
             }
@@ -475,6 +537,7 @@
         const matchId = getCurrentMatchIdFromUrl();
         if (!matchId) return null;
 
+        const context = getLastJobContext();
         const text = document.body?.innerText || '';
         const title = document.title || '';
 
@@ -510,7 +573,7 @@
 
         return {
             match_id: matchId,
-            job_id: null,
+            job_id: context?.job_id || null,
             source_url: window.location.href,
             player_a: playerA,
             player_b: playerB,
@@ -522,10 +585,7 @@
     }
 
     async function sendResultToApi(payload) {
-        log('Sende Ergebnis an API:', payload);
-        const response = await triplecorePost('/api/results', payload);
-        log('✅ Ergebnis gespeichert:', response);
-        return response;
+        return await triplecorePost('/api/results', payload);
     }
 
     async function maybeAutoSendResult() {
@@ -537,8 +597,11 @@
         if (alreadySentResult(payload.match_id)) return;
 
         try {
+            log('Auto-Sende Ergebnis:', payload.match_id);
             await sendResultToApi(payload);
             setSentResult(payload.match_id);
+            clearLastJobContext();
+            log('Ergebnis automatisch gesendet:', payload.match_id);
         } catch (err) {
             console.error('[TRIPLECORE] Fehler beim Auto-Senden des Ergebnisses:', err);
         }
@@ -547,13 +610,14 @@
     async function manualSendResult() {
         const payload = extractResultFromHistoryPage();
         if (!payload) {
-            alert('Kein Ergebnis auf dieser Seite erkannt.');
+            alert('Kein gültiges Ergebnis erkannt.');
             return;
         }
 
         try {
             await sendResultToApi(payload);
             setSentResult(payload.match_id);
+            clearLastJobContext();
             alert('Ergebnis an TripleCore gesendet.');
         } catch (err) {
             console.error('[TRIPLECORE] Fehler beim Senden des Ergebnisses:', err);
@@ -562,11 +626,17 @@
     }
 
     async function autoProcessCurrentJob() {
+        if (isBusyInActiveMatch()) return;
         if (!currentOpenJob) return;
         await processJob(currentOpenJob, 'auto');
     }
 
     async function manualProcessCurrentJob() {
+        if (isBusyInActiveMatch()) {
+            alert('Während eines aktiven Matches ist kein neuer Auto-Lobby-Trigger erlaubt.');
+            return;
+        }
+
         if (!currentOpenJob) {
             alert('Kein offener TripleCore-Job vorhanden.');
             return;
@@ -581,6 +651,12 @@
     }
 
     async function pollLoop() {
+        if (isBusyInActiveMatch()) {
+            currentOpenJob = null;
+            updateStatusBadge();
+            return;
+        }
+
         await loadNextJob();
         await autoProcessCurrentJob();
     }
@@ -659,13 +735,60 @@
         updateStatusBadge();
     }
 
+    function handleRouteChange() {
+        const currentPath = location.pathname + location.search + location.hash;
+        if (currentPath === lastSeenPath) return;
+
+        lastSeenPath = currentPath;
+        log('Route geändert:', currentPath);
+
+        ensureUi();
+
+        if (isHistoryMatchPage()) {
+            setTimeout(() => {
+                maybeAutoSendResult();
+            }, 1000);
+
+            setTimeout(() => {
+                maybeAutoSendResult();
+            }, 2500);
+        }
+    }
+
+    function installRouteHooks() {
+        if (window.__triplecore_route_hook_installed) return;
+        window.__triplecore_route_hook_installed = true;
+
+        const originalPushState = history.pushState;
+        history.pushState = function (...args) {
+            const result = originalPushState.apply(this, args);
+            setTimeout(handleRouteChange, 50);
+            return result;
+        };
+
+        const originalReplaceState = history.replaceState;
+        history.replaceState = function (...args) {
+            const result = originalReplaceState.apply(this, args);
+            setTimeout(handleRouteChange, 50);
+            return result;
+        };
+
+        window.addEventListener('popstate', () => setTimeout(handleRouteChange, 50));
+        window.addEventListener('hashchange', () => setTimeout(handleRouteChange, 50));
+    }
+
     function start() {
+        if (started) return;
+        started = true;
+
         installTokenHook();
+        installRouteHooks();
         ensureUi();
         log('Bridge gestartet');
         log('Client-ID:', clientId);
 
         pollLoop();
+
         setInterval(() => {
             ensureUi();
             pollLoop();
@@ -673,7 +796,18 @@
 
         setInterval(syncCurrentLobby, LOBBY_SYNC_INTERVAL_MS);
         setInterval(maybeAutoSendResult, RESULT_SCAN_INTERVAL_MS);
+        setInterval(handleRouteChange, ROUTE_CHECK_INTERVAL_MS);
+
+        if (isHistoryMatchPage()) {
+            setTimeout(() => {
+                maybeAutoSendResult();
+            }, 1000);
+        }
     }
 
-    window.addEventListener('load', start);
+    if (document.readyState === 'loading') {
+        window.addEventListener('DOMContentLoaded', start, { once: true });
+    } else {
+        start();
+    }
 })();
