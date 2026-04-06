@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         TripleCore Auto Lobby Creator FINAL Bridge6.4
+// @name         TripleCore Darts Bridge 6.5
 // @namespace    triplecore
-// @version      6.4
+// @version      6.5
 // @match        *://play.autodarts.io/*
 // @grant        none
 // ==/UserScript==
