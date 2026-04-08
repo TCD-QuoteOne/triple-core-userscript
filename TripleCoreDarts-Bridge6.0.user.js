@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         TripleCore Darts Bridge 6.5
+// @name         TripleCore Darts Bridge 6.6.1
 // @namespace    triplecore
-// @version      6.5
+// @version      6.6.1
 // @match        *://play.autodarts.io/*
 // @grant        none
 // ==/UserScript==
@@ -21,16 +21,20 @@
     const CLIENT_STORAGE_KEY = 'triplecore_client_id';
     const SENT_RESULTS_KEY = 'triplecore_sent_results_v1';
     const LAST_JOB_CONTEXT_KEY = 'triplecore_last_job_context_v3';
+    const AUTODARTS_NAME_STORAGE_KEY = 'triplecore_autodarts_name_v1';
 
     let authToken = null;
+    let autodartsName = null;
     let currentOpenJob = null;
     let cachedJoinPayload = null;
     let lastHandledJobId = null;
     let processingJob = false;
 
-    let badgeEl = null;
-    let buttonEl = null;
-    let resultButtonEl = null;
+    let toolbarRootEl = null;
+    let toolbarButtonEl = null;
+    let toolbarResultButtonEl = null;
+    let toolbarStatusEl = null;
+    let domObserver = null;
 
     let started = false;
     let lastSeenPath = location.pathname + location.search + location.hash;
@@ -91,6 +95,52 @@
         localStorage.removeItem(LAST_JOB_CONTEXT_KEY);
     }
 
+    function saveAutodartsName(name) {
+        const normalized = normalizeName(name);
+        if (!normalized) return;
+        autodartsName = normalized;
+        localStorage.setItem(AUTODARTS_NAME_STORAGE_KEY, normalized);
+        updateToolbarStatus();
+        log('Autodarts-Name erkannt:', normalized);
+    }
+
+    function loadStoredAutodartsName() {
+        if (autodartsName) return autodartsName;
+        const stored = localStorage.getItem(AUTODARTS_NAME_STORAGE_KEY);
+        if (stored) {
+            autodartsName = normalizeName(stored);
+            return autodartsName;
+        }
+        return null;
+    }
+
+    function getAutodartsName() {
+        return autodartsName || loadStoredAutodartsName();
+    }
+
+    function normalizeName(value) {
+        return String(value || '').trim().toLowerCase();
+    }
+
+    function extractAutodartsNameFromBoards(data) {
+        if (!Array.isArray(data)) return;
+
+        const counts = {};
+        for (const board of data) {
+            const permissions = Array.isArray(board?.permissions) ? board.permissions : [];
+            for (const permission of permissions) {
+                const name = normalizeName(permission?.user?.name);
+                if (!name) continue;
+                counts[name] = (counts[name] || 0) + 1;
+            }
+        }
+
+        const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+        if (sorted.length > 0) {
+            saveAutodartsName(sorted[0][0]);
+        }
+    }
+
     const clientId = getClientId();
 
     function log(...args) {
@@ -126,16 +176,21 @@
         return isActiveMatchPage();
     }
 
-    function updateStatusBadge() {
-        if (!badgeEl) return;
-
+    function getStatusText() {
         const tokenState = hasToken() ? 'Token ✅' : 'Token ❌';
+        const nameState = getAutodartsName() ? `Name ✅ (${getAutodartsName()})` : 'Name ❌';
         const jobState = hasOpenJob() ? 'Job ✅' : 'Job ❌';
         const busyState = isBusyInActiveMatch()
             ? 'Im aktiven Match'
             : (processingJob ? 'Erstellt…' : 'Idle');
 
-        badgeEl.textContent = `TripleCore Bridge aktiv — ${tokenState} • ${jobState} • ${busyState}`;
+        return `TripleCore • ${tokenState} • ${nameState} • ${jobState} • ${busyState}`;
+    }
+
+    function updateToolbarStatus() {
+        if (!toolbarStatusEl) return;
+        toolbarStatusEl.textContent = getStatusText();
+        toolbarStatusEl.title = getStatusText();
     }
 
     function getCurrentLobbyIdFromUrl() {
@@ -182,7 +237,7 @@
                     String(value).startsWith('Bearer ')
                 ) {
                     authToken = String(value).replace('Bearer ', '').trim();
-                    updateStatusBadge();
+                    updateToolbarStatus();
                 }
                 return originalSetHeader.apply(this, arguments);
             };
@@ -193,6 +248,22 @@
 
                 xhr.addEventListener('load', function () {
                     try {
+                        if (requestUrl.includes('/bs/v0/boards')) {
+                            let data = null;
+                            try {
+                                if (xhr.responseType === 'json') {
+                                    data = xhr.response;
+                                } else if (xhr.responseType === '' || xhr.responseType === 'text') {
+                                    data = safeJsonParse(xhr.responseText);
+                                }
+                            } catch {
+                                data = null;
+                            }
+                            if (data) {
+                                extractAutodartsNameFromBoards(data);
+                            }
+                        }
+
                         const isAutodartsRequest = requestUrl.includes('/gs/v0/lobbies/');
                         if (
                             isAutodartsRequest &&
@@ -210,7 +281,7 @@
                             }
                         }
                     } catch (err) {
-                        console.error('[TRIPLECORE] Fehler beim Join-Payload-Caching:', err);
+                        console.error('[TRIPLECORE] Fehler im XHR-Hook:', err);
                     }
                 });
 
@@ -375,22 +446,29 @@
     async function loadNextJob() {
         if (isBusyInActiveMatch()) {
             currentOpenJob = null;
-            updateStatusBadge();
+            updateToolbarStatus();
+            return;
+        }
+
+        const name = getAutodartsName();
+        if (!name) {
+            currentOpenJob = null;
+            updateToolbarStatus();
             return;
         }
 
         try {
-            const job = await triplecoreGet('/api/jobs/next');
+            const job = await triplecoreGet(`/api/jobs/next?autodarts_name=${encodeURIComponent(name)}`);
 
             if (!job || job.status === 'empty') {
                 currentOpenJob = null;
-                updateStatusBadge();
+                updateToolbarStatus();
                 return;
             }
 
             if (job.status === 'open' && job.id && job.settings) {
                 currentOpenJob = job;
-                updateStatusBadge();
+                updateToolbarStatus();
             }
         } catch (err) {
             console.error('[TRIPLECORE] Fehler beim Laden des offenen Jobs:', err);
@@ -399,7 +477,8 @@
 
     async function claimJob(job) {
         return await triplecorePost(`/api/jobs/${job.id}/claim`, {
-            client_id: clientId
+            client_id: clientId,
+            autodarts_name: getAutodartsName()
         });
     }
 
@@ -452,10 +531,11 @@
         if (!job || !job.id || !job.settings) return false;
         if (lastHandledJobId === job.id) return false;
         if (isBusyInActiveMatch()) return false;
+        if (!getAutodartsName()) return false;
 
         if (!authToken) {
             log('Noch kein Auth-Token verfügbar');
-            updateStatusBadge();
+            updateToolbarStatus();
             return false;
         }
 
@@ -465,7 +545,7 @@
         }
 
         processingJob = true;
-        updateStatusBadge();
+        updateToolbarStatus();
 
         try {
             const claimResult = await claimJob(job);
@@ -508,7 +588,7 @@
 
             lastHandledJobId = claimedJob.id;
             currentOpenJob = null;
-            updateStatusBadge();
+            updateToolbarStatus();
 
             window.location.href = `/lobbies/${lobby.id}`;
             return true;
@@ -523,11 +603,11 @@
                 console.error('[TRIPLECORE] Fehler beim Status-Rollback:', rollbackErr);
             }
 
-            updateStatusBadge();
+            updateToolbarStatus();
             return false;
         } finally {
             processingJob = false;
-            updateStatusBadge();
+            updateToolbarStatus();
         }
     }
 
@@ -647,13 +727,18 @@
             return;
         }
 
+        if (!getAutodartsName()) {
+            alert('Autodarts-Name noch nicht erkannt. Öffne einmal deine Boards/Lobbys in Autodarts.');
+            return;
+        }
+
         await processJob(currentOpenJob, 'manual-button');
     }
 
     async function pollLoop() {
         if (isBusyInActiveMatch()) {
             currentOpenJob = null;
-            updateStatusBadge();
+            updateToolbarStatus();
             return;
         }
 
@@ -661,78 +746,102 @@
         await autoProcessCurrentJob();
     }
 
-    function ensureUi() {
-        if (!badgeEl || !document.body.contains(badgeEl)) {
-            badgeEl = document.createElement('div');
-            badgeEl.id = 'triplecore-bridge-badge';
-            Object.assign(badgeEl.style, {
-                position: 'fixed',
-                top: '16px',
-                right: '16px',
-                zIndex: '999999',
-                padding: '8px 12px',
-                borderRadius: '8px',
-                background: '#0ea5e9',
-                color: '#fff',
-                fontSize: '13px',
-                fontWeight: '600',
-                boxShadow: '0 4px 12px rgba(0,0,0,.25)'
-            });
-            document.body.appendChild(badgeEl);
+    function getToolbarHost() {
+        const selectors = [
+            'header',
+            '[class*="topbar"]',
+            '[class*="toolbar"]',
+            '[class*="header"]',
+            '[class*="appbar"]',
+            '[class*="navbar"]'
+        ];
+
+        for (const selector of selectors) {
+            const node = document.querySelector(selector);
+            if (node) return node;
         }
 
-        if (!buttonEl || !document.body.contains(buttonEl)) {
-            buttonEl = document.createElement('button');
-            buttonEl.id = 'triplecore-auto-lobby-button';
-            buttonEl.textContent = 'Auto Lobby';
-            Object.assign(buttonEl.style, {
-                position: 'fixed',
-                top: '56px',
-                right: '16px',
-                zIndex: '999999',
-                padding: '10px 14px',
+        return document.body;
+    }
+
+    function ensureToolbarUi() {
+        const host = getToolbarHost();
+        if (!host) return;
+
+        if (!toolbarRootEl || !document.body.contains(toolbarRootEl)) {
+            toolbarRootEl = document.createElement('div');
+            toolbarRootEl.id = 'triplecore-toolbar-root';
+            Object.assign(toolbarRootEl.style, {
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                marginLeft: '12px',
+                flexWrap: 'wrap',
+                zIndex: '999999'
+            });
+        }
+
+        if (!toolbarStatusEl) {
+            toolbarStatusEl = document.createElement('div');
+            toolbarStatusEl.id = 'triplecore-toolbar-status';
+            Object.assign(toolbarStatusEl.style, {
+                padding: '6px 10px',
+                borderRadius: '8px',
+                fontSize: '12px',
+                fontWeight: '600',
+                background: 'rgba(14,165,233,0.15)',
+                color: '#e2e8f0',
+                border: '1px solid rgba(14,165,233,0.35)'
+            });
+            toolbarRootEl.appendChild(toolbarStatusEl);
+        }
+
+        if (!toolbarButtonEl) {
+            toolbarButtonEl = document.createElement('button');
+            toolbarButtonEl.id = 'triplecore-auto-lobby-button';
+            toolbarButtonEl.textContent = 'Auto Lobby';
+            Object.assign(toolbarButtonEl.style, {
+                padding: '8px 12px',
                 border: 'none',
                 borderRadius: '8px',
                 background: '#2563eb',
                 color: '#fff',
-                fontSize: '14px',
+                fontSize: '13px',
                 fontWeight: '700',
-                cursor: 'pointer',
-                boxShadow: '0 4px 12px rgba(0,0,0,.25)'
+                cursor: 'pointer'
             });
-            buttonEl.addEventListener('click', manualProcessCurrentJob);
-            document.body.appendChild(buttonEl);
+            toolbarButtonEl.addEventListener('click', manualProcessCurrentJob);
+            toolbarRootEl.appendChild(toolbarButtonEl);
         }
 
         if (isHistoryMatchPage()) {
-            if (!resultButtonEl || !document.body.contains(resultButtonEl)) {
-                resultButtonEl = document.createElement('button');
-                resultButtonEl.id = 'triplecore-result-button';
-                resultButtonEl.textContent = 'Ergebnis senden';
-                Object.assign(resultButtonEl.style, {
-                    position: 'fixed',
-                    top: '96px',
-                    right: '16px',
-                    zIndex: '999999',
-                    padding: '10px 14px',
+            if (!toolbarResultButtonEl) {
+                toolbarResultButtonEl = document.createElement('button');
+                toolbarResultButtonEl.id = 'triplecore-result-button';
+                toolbarResultButtonEl.textContent = 'Ergebnis senden';
+                Object.assign(toolbarResultButtonEl.style, {
+                    padding: '8px 12px',
                     border: 'none',
                     borderRadius: '8px',
                     background: '#16a34a',
                     color: '#fff',
-                    fontSize: '14px',
+                    fontSize: '13px',
                     fontWeight: '700',
-                    cursor: 'pointer',
-                    boxShadow: '0 4px 12px rgba(0,0,0,.25)'
+                    cursor: 'pointer'
                 });
-                resultButtonEl.addEventListener('click', manualSendResult);
-                document.body.appendChild(resultButtonEl);
+                toolbarResultButtonEl.addEventListener('click', manualSendResult);
+                toolbarRootEl.appendChild(toolbarResultButtonEl);
             }
-        } else if (resultButtonEl && document.body.contains(resultButtonEl)) {
-            resultButtonEl.remove();
-            resultButtonEl = null;
+        } else if (toolbarResultButtonEl) {
+            toolbarResultButtonEl.remove();
+            toolbarResultButtonEl = null;
         }
 
-        updateStatusBadge();
+        if (!host.contains(toolbarRootEl)) {
+            host.appendChild(toolbarRootEl);
+        }
+
+        updateToolbarStatus();
     }
 
     function handleRouteChange() {
@@ -742,7 +851,7 @@
         lastSeenPath = currentPath;
         log('Route geändert:', currentPath);
 
-        ensureUi();
+        ensureToolbarUi();
 
         if (isHistoryMatchPage()) {
             setTimeout(() => {
@@ -777,20 +886,59 @@
         window.addEventListener('hashchange', () => setTimeout(handleRouteChange, 50));
     }
 
+    function installDomObserver() {
+        if (domObserver) return;
+
+        domObserver = new MutationObserver(() => {
+            ensureToolbarUi();
+        });
+
+        domObserver.observe(document.documentElement || document.body, {
+            childList: true,
+            subtree: true
+        });
+    }
+
+    function installFetchNameHook() {
+        if (window.__triplecore_fetch_name_hook_installed) return;
+        window.__triplecore_fetch_name_hook_installed = true;
+
+        const originalFetch = window.fetch;
+        window.fetch = async function (...args) {
+            const response = await originalFetch.apply(this, args);
+
+            try {
+                const requestUrl = typeof args[0] === 'string' ? args[0] : args[0]?.url;
+                if (requestUrl && requestUrl.includes('/bs/v0/boards')) {
+                    const clone = response.clone();
+                    const data = await clone.json();
+                    extractAutodartsNameFromBoards(data);
+                }
+            } catch (err) {
+                console.warn('[TRIPLECORE] Fehler im Fetch-Name-Hook:', err);
+            }
+
+            return response;
+        };
+    }
+
     function start() {
         if (started) return;
         started = true;
 
+        loadStoredAutodartsName();
         installTokenHook();
+        installFetchNameHook();
         installRouteHooks();
-        ensureUi();
+        installDomObserver();
+        ensureToolbarUi();
         log('Bridge gestartet');
         log('Client-ID:', clientId);
 
         pollLoop();
 
         setInterval(() => {
-            ensureUi();
+            ensureToolbarUi();
             pollLoop();
         }, POLL_INTERVAL_MS);
 
