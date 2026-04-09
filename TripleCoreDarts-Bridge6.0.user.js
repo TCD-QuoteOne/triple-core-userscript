@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         TripleCore Darts Bridge 6.6.1
+// @name         TripleCore Darts Bridge 6.6.2
 // @namespace    triplecore
-// @version      6.6.1
+// @version      6.6.2
 // @match        *://play.autodarts.io/*
 // @grant        none
 // ==/UserScript==
@@ -34,7 +34,6 @@
     let toolbarButtonEl = null;
     let toolbarResultButtonEl = null;
     let toolbarStatusEl = null;
-    let domObserver = null;
 
     let started = false;
     let lastSeenPath = location.pathname + location.search + location.hash;
@@ -95,6 +94,10 @@
         localStorage.removeItem(LAST_JOB_CONTEXT_KEY);
     }
 
+    function normalizeName(value) {
+        return String(value || '').trim().toLowerCase();
+    }
+
     function saveAutodartsName(name) {
         const normalized = normalizeName(name);
         if (!normalized) return;
@@ -116,10 +119,6 @@
 
     function getAutodartsName() {
         return autodartsName || loadStoredAutodartsName();
-    }
-
-    function normalizeName(value) {
-        return String(value || '').trim().toLowerCase();
     }
 
     function extractAutodartsNameFromBoards(data) {
@@ -178,7 +177,8 @@
 
     function getStatusText() {
         const tokenState = hasToken() ? 'Token ✅' : 'Token ❌';
-        const nameState = getAutodartsName() ? `Name ✅ (${getAutodartsName()})` : 'Name ❌';
+        const name = getAutodartsName();
+        const nameState = name ? `Name ✅ (${name})` : 'Name ❌';
         const jobState = hasOpenJob() ? 'Job ✅' : 'Job ❌';
         const busyState = isBusyInActiveMatch()
             ? 'Im aktiven Match'
@@ -189,8 +189,9 @@
 
     function updateToolbarStatus() {
         if (!toolbarStatusEl) return;
-        toolbarStatusEl.textContent = getStatusText();
-        toolbarStatusEl.title = getStatusText();
+        const text = getStatusText();
+        toolbarStatusEl.textContent = text;
+        toolbarStatusEl.title = text;
     }
 
     function getCurrentLobbyIdFromUrl() {
@@ -231,11 +232,7 @@
             xhr.setRequestHeader = function (key, value) {
                 const lowerKey = String(key).toLowerCase();
                 const isAutodartsRequest = requestUrl.includes('api.autodarts.io');
-                if (
-                    isAutodartsRequest &&
-                    lowerKey === 'authorization' &&
-                    String(value).startsWith('Bearer ')
-                ) {
+                if (isAutodartsRequest && lowerKey === 'authorization' && String(value).startsWith('Bearer ')) {
                     authToken = String(value).replace('Bearer ', '').trim();
                     updateToolbarStatus();
                 }
@@ -349,11 +346,7 @@
     }
 
     async function createLobbyViaAutodartsApi(settings) {
-        if (!authToken) {
-            throw new Error('Kein Auth-Token verfügbar');
-        }
-
-        const payload = mapSettingsToAutodartsPayload(settings);
+        if (!authToken) throw new Error('Kein Auth-Token verfügbar');
 
         const response = await fetch(`${AUTODARTS_API_BASE}/lobbies`, {
             method: 'POST',
@@ -362,7 +355,7 @@
                 'Authorization': `Bearer ${authToken}`,
                 'Accept': 'application/json, text/plain, */*'
             },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(mapSettingsToAutodartsPayload(settings))
         });
 
         if (!response.ok) {
@@ -374,9 +367,7 @@
     }
 
     async function fetchLobbyData(lobbyId) {
-        if (!authToken) {
-            throw new Error('Kein Auth-Token verfügbar');
-        }
+        if (!authToken) throw new Error('Kein Auth-Token verfügbar');
 
         const response = await fetch(`${AUTODARTS_API_BASE}/lobbies/${lobbyId}`, {
             method: 'GET',
@@ -407,15 +398,11 @@
     function determineLobbyStatus(lobbyData) {
         const playerCount = extractPlayerCount(lobbyData);
         const maxPlayers = extractMaxPlayers(lobbyData);
-
-        if (playerCount >= maxPlayers) return 'full';
-        return 'waiting_players';
+        return playerCount >= maxPlayers ? 'full' : 'waiting_players';
     }
 
     async function joinHostToLobby(lobbyId) {
-        if (!authToken) {
-            throw new Error('Kein Auth-Token für Join verfügbar');
-        }
+        if (!authToken) throw new Error('Kein Auth-Token für Join verfügbar');
 
         if (!cachedJoinPayload || !cachedJoinPayload.userId || !cachedJoinPayload.boardId) {
             log('Kein gültiger Join-Payload vorhanden — Join wird übersprungen');
@@ -483,16 +470,12 @@
     }
 
     async function attachLobbyToJob(jobId, lobbyData) {
-        const playerCount = extractPlayerCount(lobbyData);
-        const maxPlayers = extractMaxPlayers(lobbyData);
-        const inviteUrl = `https://play.autodarts.io/lobbies/${lobbyData.id}`;
-
         return await triplecorePost(`/api/jobs/${jobId}/lobby`, {
             client_id: clientId,
             lobby_id: lobbyData.id,
-            invite: inviteUrl,
-            player_count: playerCount,
-            max_players: maxPlayers
+            invite: `https://play.autodarts.io/lobbies/${lobbyData.id}`,
+            player_count: extractPlayerCount(lobbyData),
+            max_players: extractMaxPlayers(lobbyData)
         });
     }
 
@@ -505,15 +488,12 @@
             if (!job || !job.id) return;
 
             const lobbyData = await fetchLobbyData(lobbyId);
-            const playerCount = extractPlayerCount(lobbyData);
-            const maxPlayers = extractMaxPlayers(lobbyData);
-            const status = determineLobbyStatus(lobbyData);
 
             await triplecorePost(`/api/jobs/${job.id}/sync`, {
                 client_id: clientId,
-                player_count: playerCount,
-                max_players: maxPlayers,
-                status: status
+                player_count: extractPlayerCount(lobbyData),
+                max_players: extractMaxPlayers(lobbyData),
+                status: determineLobbyStatus(lobbyData)
             });
 
             saveLastJobContext({
@@ -521,12 +501,11 @@
                 lobby_id: lobbyId,
                 job_type: job.job_type || 'lfg'
             });
-        } catch (err) {
-            // unbekannte Lobby ist okay
+        } catch {
         }
     }
 
-    async function processJob(job, source = 'auto') {
+    async function processJob(job) {
         if (processingJob) return false;
         if (!job || !job.id || !job.settings) return false;
         if (lastHandledJobId === job.id) return false;
@@ -549,17 +528,11 @@
 
         try {
             const claimResult = await claimJob(job);
-            if (!claimResult.claimed) {
-                return false;
-            }
+            if (!claimResult.claimed) return false;
 
             const claimedJob = claimResult.job || job;
-
             const lobby = await createLobbyViaAutodartsApi(claimedJob.settings);
-
-            if (!lobby || !lobby.id) {
-                throw new Error('Keine Lobby-ID in der Antwort erhalten');
-            }
+            if (!lobby || !lobby.id) throw new Error('Keine Lobby-ID in der Antwort erhalten');
 
             try {
                 await joinHostToLobby(lobby.id);
@@ -570,10 +543,8 @@
             const freshLobbyData = await fetchLobbyData(lobby.id);
             await attachLobbyToJob(claimedJob.id, freshLobbyData);
 
-            const inviteUrl = `https://play.autodarts.io/lobbies/${lobby.id}`;
-
             await triplecorePost(`/api/jobs/${claimedJob.id}/invite`, {
-                invite: inviteUrl
+                invite: `https://play.autodarts.io/lobbies/${lobby.id}`
             });
 
             await triplecorePost(`/api/jobs/${claimedJob.id}/status`, {
@@ -594,16 +565,11 @@
             return true;
         } catch (err) {
             console.error('[TRIPLECORE] Fehler bei der Job-Verarbeitung:', err);
-
             try {
-                await triplecorePost(`/api/jobs/${job.id}/status`, {
-                    status: 'open'
-                });
+                await triplecorePost(`/api/jobs/${job.id}/status`, { status: 'open' });
             } catch (rollbackErr) {
                 console.error('[TRIPLECORE] Fehler beim Status-Rollback:', rollbackErr);
             }
-
-            updateToolbarStatus();
             return false;
         } finally {
             processingJob = false;
@@ -647,9 +613,7 @@
         const legsMatch = text.match(/Gewonnene Legs\s+(\d+)\s+(\d+)/i);
         const avgMatch = text.match(/Durchschnitt\s+([\d.,]+)\s+([\d.,]+)/i);
 
-        if (!playerA || !playerB || !legsMatch || !avgMatch) {
-            return null;
-        }
+        if (!playerA || !playerB || !legsMatch || !avgMatch) return null;
 
         return {
             match_id: matchId,
@@ -669,15 +633,13 @@
     }
 
     async function maybeAutoSendResult() {
-        if (!AUTO_SEND_RESULTS) return;
-        if (!isHistoryMatchPage()) return;
+        if (!AUTO_SEND_RESULTS || !isHistoryMatchPage()) return;
 
         const payload = extractResultFromHistoryPage();
         if (!payload || !payload.match_id) return;
         if (alreadySentResult(payload.match_id)) return;
 
         try {
-            log('Auto-Sende Ergebnis:', payload.match_id);
             await sendResultToApi(payload);
             setSentResult(payload.match_id);
             clearLastJobContext();
@@ -705,45 +667,25 @@
         }
     }
 
-    async function autoProcessCurrentJob() {
-        if (isBusyInActiveMatch()) return;
-        if (!currentOpenJob) return;
-        await processJob(currentOpenJob, 'auto');
-    }
-
     async function manualProcessCurrentJob() {
         if (isBusyInActiveMatch()) {
             alert('Während eines aktiven Matches ist kein neuer Auto-Lobby-Trigger erlaubt.');
             return;
         }
-
         if (!currentOpenJob) {
             alert('Kein offener TripleCore-Job vorhanden.');
             return;
         }
-
         if (!authToken) {
             alert('Noch kein Auth-Token verfügbar. Öffne einmal manuell eine Lobby, damit der Token abgegriffen wird.');
             return;
         }
-
         if (!getAutodartsName()) {
             alert('Autodarts-Name noch nicht erkannt. Öffne einmal deine Boards/Lobbys in Autodarts.');
             return;
         }
 
-        await processJob(currentOpenJob, 'manual-button');
-    }
-
-    async function pollLoop() {
-        if (isBusyInActiveMatch()) {
-            currentOpenJob = null;
-            updateToolbarStatus();
-            return;
-        }
-
-        await loadNextJob();
-        await autoProcessCurrentJob();
+        await processJob(currentOpenJob);
     }
 
     function getToolbarHost() {
@@ -758,10 +700,12 @@
 
         for (const selector of selectors) {
             const node = document.querySelector(selector);
-            if (node) return node;
+            if (node && node !== document.body && node !== document.documentElement) {
+                return node;
+            }
         }
 
-        return document.body;
+        return null;
     }
 
     function ensureToolbarUi() {
@@ -776,8 +720,7 @@
                 alignItems: 'center',
                 gap: '8px',
                 marginLeft: '12px',
-                flexWrap: 'wrap',
-                zIndex: '999999'
+                flexWrap: 'wrap'
             });
         }
 
@@ -790,7 +733,7 @@
                 fontSize: '12px',
                 fontWeight: '600',
                 background: 'rgba(14,165,233,0.15)',
-                color: '#e2e8f0',
+                color: 'inherit',
                 border: '1px solid rgba(14,165,233,0.35)'
             });
             toolbarRootEl.appendChild(toolbarStatusEl);
@@ -849,18 +792,11 @@
         if (currentPath === lastSeenPath) return;
 
         lastSeenPath = currentPath;
-        log('Route geändert:', currentPath);
-
         ensureToolbarUi();
 
         if (isHistoryMatchPage()) {
-            setTimeout(() => {
-                maybeAutoSendResult();
-            }, 1000);
-
-            setTimeout(() => {
-                maybeAutoSendResult();
-            }, 2500);
+            setTimeout(maybeAutoSendResult, 1000);
+            setTimeout(maybeAutoSendResult, 2500);
         }
     }
 
@@ -886,19 +822,6 @@
         window.addEventListener('hashchange', () => setTimeout(handleRouteChange, 50));
     }
 
-    function installDomObserver() {
-        if (domObserver) return;
-
-        domObserver = new MutationObserver(() => {
-            ensureToolbarUi();
-        });
-
-        domObserver.observe(document.documentElement || document.body, {
-            childList: true,
-            subtree: true
-        });
-    }
-
     function installFetchNameHook() {
         if (window.__triplecore_fetch_name_hook_installed) return;
         window.__triplecore_fetch_name_hook_installed = true;
@@ -922,6 +845,20 @@
         };
     }
 
+    async function pollLoop() {
+        if (isBusyInActiveMatch()) {
+            currentOpenJob = null;
+            updateToolbarStatus();
+            return;
+        }
+
+        await loadNextJob();
+
+        if (currentOpenJob) {
+            await processJob(currentOpenJob);
+        }
+    }
+
     function start() {
         if (started) return;
         started = true;
@@ -930,26 +867,21 @@
         installTokenHook();
         installFetchNameHook();
         installRouteHooks();
-        installDomObserver();
-        ensureToolbarUi();
-        log('Bridge gestartet');
-        log('Client-ID:', clientId);
+
+        setTimeout(ensureToolbarUi, 500);
+        setTimeout(ensureToolbarUi, 1500);
+        setTimeout(ensureToolbarUi, 3000);
 
         pollLoop();
 
-        setInterval(() => {
-            ensureToolbarUi();
-            pollLoop();
-        }, POLL_INTERVAL_MS);
-
+        setInterval(ensureToolbarUi, 3000);
+        setInterval(pollLoop, POLL_INTERVAL_MS);
         setInterval(syncCurrentLobby, LOBBY_SYNC_INTERVAL_MS);
         setInterval(maybeAutoSendResult, RESULT_SCAN_INTERVAL_MS);
         setInterval(handleRouteChange, ROUTE_CHECK_INTERVAL_MS);
 
         if (isHistoryMatchPage()) {
-            setTimeout(() => {
-                maybeAutoSendResult();
-            }, 1000);
+            setTimeout(maybeAutoSendResult, 1000);
         }
     }
 
