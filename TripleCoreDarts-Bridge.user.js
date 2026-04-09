@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TripleCore Darts Bridge
 // @namespace    triplecore
-// @version      6.6.3
+// @version      6.7.0
 // @description  TripleCore Bridge für Autodarts mit Lobby-Automation, Owner-Schutz und Ergebnisübertragung.
 // @author       TripleCore
 // @match        *://play.autodarts.io/*
@@ -532,7 +532,12 @@
 
         try {
             const claimResult = await claimJob(job);
-            if (!claimResult.claimed) return false;
+            if (!claimResult.claimed) {
+                if (claimResult.reason === 'owner_mismatch') {
+                    log('Claim wegen Owner-Mismatch abgelehnt:', job.id);
+                }
+                return false;
+            }
 
             const claimedJob = claimResult.job || job;
             const lobby = await createLobbyViaAutodartsApi(claimedJob.settings);
