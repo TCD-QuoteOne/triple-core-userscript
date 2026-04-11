@@ -13,8 +13,7 @@
 (function () {
     'use strict';
 
-    const DEFAULT_TRIPLECORE_API_BASE = 'https://api.triplecore.community';
-    const TRIPLECORE_API_BASE = (localStorage.getItem('triplecore_api_base_v1') || DEFAULT_TRIPLECORE_API_BASE).replace(/\/$/, '');
+    const TRIPLECORE_API_BASE = 'https://api.triplecore.community';
     const AUTODARTS_API_BASE = 'https://api.autodarts.io/gs/v0';
 
     const POLL_INTERVAL_MS = 4000;
@@ -299,10 +298,7 @@
     async function triplecoreGet(path) {
         const response = await fetch(`${TRIPLECORE_API_BASE}${path}`, {
             method: 'GET',
-            credentials: 'omit',
-            headers: {
-                'Accept': 'application/json'
-            }
+            credentials: 'omit'
         });
 
         if (!response.ok) {
@@ -438,6 +434,7 @@
 
         cachedJoinPayload = null;
     }
+
 
     function extractNextJobPayload(payload) {
         if (!payload) return null;
@@ -927,13 +924,12 @@
         if (isHistoryMatchPage()) {
             setTimeout(maybeAutoSendResult, 1000);
         }
-
-        log('Bridge gestartet mit API:', TRIPLECORE_API_BASE);
     }
 
     if (document.readyState === 'loading') {
         window.addEventListener('DOMContentLoaded', start, { once: true });
     } else {
         start();
+        log('Bridge gestartet mit API:', TRIPLECORE_API_BASE);
     }
 })();
