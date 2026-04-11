@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TripleCore Darts Bridge
 // @namespace    triplecore
-// @version      6.7.0
+// @version      6.8.0
 // @description  TripleCore Bridge für Autodarts mit Lobby-Automation, Owner-Schutz und Ergebnisübertragung.
 // @author       TripleCore
 // @match        *://play.autodarts.io/*
@@ -13,7 +13,8 @@
 (function () {
     'use strict';
 
-    const TRIPLECORE_API_BASE = 'https://api.triplecore.community';
+    const DEFAULT_TRIPLECORE_API_BASE = 'https://api.triplecore.community';
+    const TRIPLECORE_API_BASE = (localStorage.getItem('triplecore_api_base_v1') || DEFAULT_TRIPLECORE_API_BASE).replace(/\/$/, '');
     const AUTODARTS_API_BASE = 'https://api.autodarts.io/gs/v0';
 
     const POLL_INTERVAL_MS = 4000;
@@ -298,11 +299,15 @@
     async function triplecoreGet(path) {
         const response = await fetch(`${TRIPLECORE_API_BASE}${path}`, {
             method: 'GET',
-            credentials: 'omit'
+            credentials: 'omit',
+            headers: {
+                'Accept': 'application/json'
+            }
         });
 
         if (!response.ok) {
-            throw new Error(`TripleCore GET Fehler ${response.status}`);
+            const text = await response.text().catch(() => '');
+            throw new Error(`TripleCore GET Fehler ${response.status}: ${text}`);
         }
 
         return await response.json();
@@ -319,7 +324,7 @@
         });
 
         if (!response.ok) {
-            const text = await response.text();
+            const text = await response.text().catch(() => '');
             throw new Error(`TripleCore POST Fehler ${response.status}: ${text}`);
         }
 
@@ -434,6 +439,32 @@
         cachedJoinPayload = null;
     }
 
+    function extractNextJobPayload(payload) {
+        if (!payload) return null;
+
+        if (payload.found === false) {
+            return null;
+        }
+
+        if (payload.job && typeof payload.job === 'object') {
+            return payload.job;
+        }
+
+        if (payload.status === 'empty') {
+            return null;
+        }
+
+        if (payload.status === 'open' && payload.id && payload.settings) {
+            return payload;
+        }
+
+        if (payload.id && payload.settings) {
+            return payload;
+        }
+
+        return null;
+    }
+
     async function loadNextJob() {
         if (isBusyInActiveMatch()) {
             currentOpenJob = null;
@@ -449,16 +480,20 @@
         }
 
         try {
-            const job = await triplecoreGet(`/api/jobs/next?autodarts_name=${encodeURIComponent(name)}`);
+            const payload = await triplecoreGet(`/api/jobs/next?autodarts_name=${encodeURIComponent(name)}`);
+            const job = extractNextJobPayload(payload);
 
-            if (!job || job.status === 'empty') {
+            if (!job) {
                 currentOpenJob = null;
                 updateToolbarStatus();
                 return;
             }
 
-            if (job.status === 'open' && job.id && job.settings) {
+            if (job.id && job.settings) {
                 currentOpenJob = job;
+                updateToolbarStatus();
+            } else {
+                currentOpenJob = null;
                 updateToolbarStatus();
             }
         } catch (err) {
@@ -892,6 +927,8 @@
         if (isHistoryMatchPage()) {
             setTimeout(maybeAutoSendResult, 1000);
         }
+
+        log('Bridge gestartet mit API:', TRIPLECORE_API_BASE);
     }
 
     if (document.readyState === 'loading') {
