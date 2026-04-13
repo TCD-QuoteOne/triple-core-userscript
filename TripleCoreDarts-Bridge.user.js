@@ -535,7 +535,9 @@
             saveLastJobContext({
                 job_id: job.id,
                 lobby_id: lobbyId,
-                job_type: job.job_type || 'lfg'
+                job_type: job.job_type || 'lfg',
+                league_match_id: job.match_id || null,
+                season_id: job.season_id || null
             });
         } catch {
         }
@@ -595,7 +597,9 @@
             saveLastJobContext({
                 job_id: claimedJob.id,
                 lobby_id: lobby.id,
-                job_type: claimedJob.job_type || 'lfg'
+                job_type: claimedJob.job_type || 'lfg',
+                league_match_id: claimedJob.match_id || null,
+                season_id: claimedJob.season_id || null
             });
 
             lastHandledJobId = claimedJob.id;
@@ -662,6 +666,8 @@
             source_url: window.location.href,
             player_a: playerA,
             player_b: playerB,
+            league_match_id: context?.league_match_id || null,
+            season_id: context?.season_id || null,
             score_a: Number(legsMatch[1]),
             score_b: Number(legsMatch[2]),
             avg_a: Number(String(avgMatch[1]).replace(',', '.')),
