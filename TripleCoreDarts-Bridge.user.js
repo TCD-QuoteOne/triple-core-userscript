@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TripleCore Darts Bridge
 // @namespace    triplecore
-// @version      6.8.0
+// @version      6.8.1
 // @description  TripleCore Bridge für Autodarts mit Lobby-Automation, Owner-Schutz und Ergebnisübertragung.
 // @author       TripleCore
 // @match        *://play.autodarts.io/*
