@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TripleCore Darts Bridge
 // @namespace    triplecore
-// @version      6.8.2
+// @version      6.8.3
 // @description  TripleCore Bridge für Autodarts mit Lobby-Automation, Owner-Schutz und Ergebnisübertragung.
 // @author       TripleCore
 // @match        *://play.autodarts.io/*
@@ -26,7 +26,6 @@
     const SENT_RESULTS_KEY = 'triplecore_sent_results_v1';
     const LAST_JOB_CONTEXT_KEY = 'triplecore_last_job_context_v3';
     const AUTODARTS_NAME_STORAGE_KEY = 'triplecore_autodarts_name_v1';
-    const RESULT_FINGERPRINTS_KEY = 'triplecore_result_fingerprints_v1';
 
     let authToken = null;
     let autodartsName = null;
@@ -34,7 +33,6 @@
     let cachedJoinPayload = null;
     let lastHandledJobId = null;
     let processingJob = false;
-    const pendingResultFingerprints = new Set();
 
     let toolbarRootEl = null;
     let toolbarButtonEl = null;
@@ -70,68 +68,6 @@
     function alreadySentResult(matchId) {
         const map = getSentResultsMap();
         return !!map[matchId];
-    }
-
-    function getResultFingerprintsMap() {
-        try {
-            return JSON.parse(localStorage.getItem(RESULT_FINGERPRINTS_KEY) || '{}');
-        } catch {
-            return {};
-        }
-    }
-
-    function buildResultFingerprint(payload) {
-        if (!payload) return '';
-        return [
-            String(payload.match_id || '').trim(),
-            String(payload.player_a || '').trim().toLowerCase(),
-            String(payload.player_b || '').trim().toLowerCase(),
-            String(payload.score_a ?? ''),
-            String(payload.score_b ?? '')
-        ].join('|');
-    }
-
-    function hasRecentResultFingerprint(payload) {
-        const key = buildResultFingerprint(payload);
-        if (!key) return false;
-
-        if (pendingResultFingerprints.has(key)) return true;
-
-        const map = getResultFingerprintsMap();
-        const value = map[key];
-        if (!value) return false;
-
-        const sentAt = new Date(value).getTime();
-        const maxAgeMs = 7 * 24 * 60 * 60 * 1000;
-        if (!sentAt || (Date.now() - sentAt) > maxAgeMs) {
-            delete map[key];
-            localStorage.setItem(RESULT_FINGERPRINTS_KEY, JSON.stringify(map));
-            return false;
-        }
-
-        return true;
-    }
-
-    function markResultFingerprintPending(payload) {
-        const key = buildResultFingerprint(payload);
-        if (!key) return;
-        pendingResultFingerprints.add(key);
-    }
-
-    function clearPendingResultFingerprint(payload) {
-        const key = buildResultFingerprint(payload);
-        if (!key) return;
-        pendingResultFingerprints.delete(key);
-    }
-
-    function setSentResultFingerprint(payload) {
-        const key = buildResultFingerprint(payload);
-        if (!key) return;
-
-        const map = getResultFingerprintsMap();
-        map[key] = new Date().toISOString();
-        localStorage.setItem(RESULT_FINGERPRINTS_KEY, JSON.stringify(map));
-        pendingResultFingerprints.delete(key);
     }
 
     function saveLastJobContext(context) {
@@ -749,22 +685,13 @@
         const payload = extractResultFromHistoryPage();
         if (!payload || !payload.match_id) return;
         if (alreadySentResult(payload.match_id)) return;
-        if (hasRecentResultFingerprint(payload)) return;
 
         try {
-            markResultFingerprintPending(payload);
-            const response = await sendResultToApi(payload);
-
-            if (response && response.ok) {
-                setSentResult(payload.match_id);
-                setSentResultFingerprint(payload);
-                clearLastJobContext();
-                log('Ergebnis automatisch gesendet:', payload.match_id, response.duplicate ? '(duplicate ignored)' : '');
-            } else {
-                clearPendingResultFingerprint(payload);
-            }
+            await sendResultToApi(payload);
+            setSentResult(payload.match_id);
+            clearLastJobContext();
+            log('Ergebnis automatisch gesendet:', payload.match_id);
         } catch (err) {
-            clearPendingResultFingerprint(payload);
             console.error('[TRIPLECORE] Fehler beim Auto-Senden des Ergebnisses:', err);
         }
     }
@@ -776,26 +703,12 @@
             return;
         }
 
-        if (alreadySentResult(payload.match_id) || hasRecentResultFingerprint(payload)) {
-            alert('Dieses Ergebnis wurde bereits an TripleCore gesendet.');
-            return;
-        }
-
         try {
-            markResultFingerprintPending(payload);
-            const response = await sendResultToApi(payload);
-
-            if (response && response.ok) {
-                setSentResult(payload.match_id);
-                setSentResultFingerprint(payload);
-                clearLastJobContext();
-                alert(response.duplicate ? 'Ergebnis war bereits vorhanden und wurde nicht erneut gepostet.' : 'Ergebnis an TripleCore gesendet.');
-            } else {
-                clearPendingResultFingerprint(payload);
-                alert('Ergebnis konnte nicht verarbeitet werden.');
-            }
+            await sendResultToApi(payload);
+            setSentResult(payload.match_id);
+            clearLastJobContext();
+            alert('Ergebnis an TripleCore gesendet.');
         } catch (err) {
-            clearPendingResultFingerprint(payload);
             console.error('[TRIPLECORE] Fehler beim Senden des Ergebnisses:', err);
             alert(`Fehler beim Senden: ${err.message}`);
         }
