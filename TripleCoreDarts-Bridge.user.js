@@ -12,7 +12,7 @@
 
 (function () {
     'use strict';
-    const USERSCRIPT_VERSION = GM_info.script.version;
+    const USERSCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info?.script?.version) || '8.0.2';
     const USERSCRIPT_UPDATE_URL = 'https://raw.githubusercontent.com/TCD-QuoteOne/triple-core-userscript/main/TripleCoreDarts-Bridge.user.js';
 
     /* ========================================
@@ -84,6 +84,7 @@
         updateStatus: 'Prüfe…',
         latestVersion: null,
         updateAvailable: false,
+        updateCheckFailed: false,
     };
 
     const Util = {
@@ -179,33 +180,63 @@
     };
 
     const UpdateCheck = {
-        async check() {
+        compareVersions(localVersion, remoteVersion) {
+            return Util.compareVersions(localVersion, remoteVersion);
+        },
+
+        async checkForUserscriptUpdate() {
             try {
                 State.updateStatus = 'Prüfe…';
+                State.updateCheckFailed = false;
+                Overlay.render();
+
                 const response = await fetch(`${USERSCRIPT_UPDATE_URL}?t=${Date.now()}`, { cache: 'no-store' });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
                 const text = await response.text();
-                const match = text.match(/@version\s+([0-9]+(?:\.[0-9]+){0,3})/i);
+                const match = text.match(/@version\s+([0-9]+\.[0-9]+\.[0-9]+)/i);
                 const latestVersion = match?.[1] || null;
                 State.latestVersion = latestVersion;
 
                 if (!latestVersion) {
-                    State.updateStatus = 'Unbekannt';
+                    State.updateStatus = 'Prüfen fehlgeschlagen';
                     State.updateAvailable = false;
+                    State.updateCheckFailed = true;
                     return;
                 }
 
-                const cmp = Util.compareVersions(USERSCRIPT_VERSION, latestVersion);
+                const cmp = UpdateCheck.compareVersions(USERSCRIPT_VERSION, latestVersion);
                 State.updateAvailable = cmp < 0;
-                State.updateStatus = cmp < 0 ? `Update ${latestVersion}` : 'Aktuell';
+                State.updateCheckFailed = false;
+                State.updateStatus = cmp < 0 ? 'Update' : 'Aktuell';
             } catch (err) {
                 Util.warn('Update check failed', err);
-                State.updateStatus = 'Fehler';
+                State.updateStatus = 'Prüfen fehlgeschlagen';
                 State.updateAvailable = false;
+                State.updateCheckFailed = true;
             } finally {
                 Overlay.render();
             }
+        },
+
+        handleUpdateChipClick() {
+            if (State.updateAvailable) {
+                window.open(USERSCRIPT_UPDATE_URL, '_blank', 'noopener,noreferrer');
+                return;
+            }
+
+            if (State.updateCheckFailed) {
+                UpdateCheck.checkForUserscriptUpdate();
+                return;
+            }
+
+            Util.status('Keine neue Version');
+        },
+
+        getChipClassName() {
+            if (State.updateCheckFailed) return 'tc-chip tc-chip--update-error';
+            if (State.updateAvailable) return 'tc-chip tc-chip--update-available';
+            return 'tc-chip tc-chip--update-current';
         },
     };
 
@@ -1213,6 +1244,24 @@
                     background:rgba(95,161,255,.14);
                     color:#cfe0ff;
                 }
+                #triplecore-overlay-v810 .tc-chip--update-current{
+                    border-color:rgba(66,203,125,.55);
+                    background:rgba(66,203,125,.2);
+                    color:#d9ffe8;
+                }
+                #triplecore-overlay-v810 .tc-chip--update-available{
+                    border-color:rgba(255,193,7,.55);
+                    background:rgba(255,193,7,.2);
+                    color:#ffefb8;
+                }
+                #triplecore-overlay-v810 .tc-chip--update-error{
+                    border-color:rgba(255,91,91,.6);
+                    background:rgba(255,91,91,.2);
+                    color:#ffd7d7;
+                }
+                #triplecore-overlay-v810 .tc-chip--button{
+                    cursor:pointer;
+                }
                 #triplecore-overlay-v810 .tc-collapse{
                     display:inline-flex;
                     align-items:center;
@@ -1335,7 +1384,7 @@
                         <span class="tc-chip">Modus: ${modeLabel}</span>
                         <span class="tc-chip">Status: ${State.statusText || 'Bereit'}</span>
                         <span class="tc-chip">Version: ${USERSCRIPT_VERSION}</span>
-                        <span class="tc-chip">Update: ${State.updateStatus}</span>
+                        <button id="tc-update-chip" class="${UpdateCheck.getChipClassName()} tc-chip--button" type="button" title="Update-Status prüfen/öffnen">Update: ${State.updateStatus}</button>
                     </div>
                 </div>
                 <button id="tc-collapse" class="tc-collapse">${State.collapsed ? '▴' : '▾'}</button>
@@ -1346,6 +1395,10 @@
                 State.collapsed = !State.collapsed;
                 Storage.saveUiState();
                 Overlay.render();
+            });
+
+            header.querySelector('#tc-update-chip')?.addEventListener('click', () => {
+                UpdateCheck.handleUpdateChipClick();
             });
 
             const body = document.createElement('div');
@@ -1460,6 +1513,7 @@
 
         LobbyFlow.installCreateListener();
         Overlay.render();
+        UpdateCheck.checkForUserscriptUpdate();
 
         refreshSeasonAndJobs();
         startIntervals();
