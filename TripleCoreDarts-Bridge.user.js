@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TripleCore Overlay Bridge
 // @namespace    triplecore
-// @version      8.0.5
+// @version      8.0.6
 // @description  TripleCore Overlay Bridge für Autodarts (ToS-safe, modular, clean rebuild)
 // @author       TripleCore
 // @match        *://play.autodarts.io/*
@@ -685,7 +685,7 @@
                 game_mode: gameMode,
                 target_wins: targetWins,
                 sets: gameMode === 'sets' ? (targetWins || sets || 0) : 0,
-                legs: gameMode === 'legs' ? (targetWins || legs || 0) : 0,
+                legs: gameMode === 'sets' ? (legs || 0) : (targetWins || legs || 0),
                 lobby: (src.lobby ?? src.visibility ?? lobbyData?.lobby ?? (lobbyData?.isPrivate ? 'private' : 'public')) === 'public' ? 'public' : 'private',
             };
 
@@ -738,14 +738,19 @@
                 1
             ) || 1;
 
+            const resolvedSets = resolvedMode === 'sets' ? resolvedTargetWins : 0;
+            const resolvedLegs = resolvedMode === 'sets'
+                ? (pickNumber(lobbyParsed.legs, job.legs, season.legs, resolvedTargetWins, 1) || 1)
+                : resolvedTargetWins;
+
             const resolved = {
                 start_points: LobbyParser.normalizeStartPoints(
                     pickNumber(lobbyParsed.start_points, job.start_points, season.start_points, 501)
                 ) || 501,
                 game_mode: resolvedMode,
                 target_wins: resolvedTargetWins,
-                sets: resolvedMode === 'sets' ? resolvedTargetWins : 0,
-                legs: resolvedMode === 'legs' ? resolvedTargetWins : 0,
+                sets: resolvedSets,
+                legs: resolvedLegs,
                 in_mode: LobbyParser.normalizeInMode(pickString(lobbyParsed.in_mode, job.in_mode, season.in_mode, 'straight')),
                 out_mode: LobbyParser.normalizeOutMode(pickString(lobbyParsed.out_mode, job.out_mode, season.out_mode, 'double')),
                 bull_mode: LobbyParser.normalizeBullMode(pickString(lobbyParsed.bull_mode, job.bull_mode, season.bull_mode, '25/50')),
