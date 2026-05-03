@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TripleCore Overlay Bridge
 // @namespace    triplecore
-// @version      8.0.6
+// @version      8.0.7
 // @description  TripleCore Overlay Bridge für Autodarts (ToS-safe, modular, clean rebuild)
 // @author       TripleCore
 // @match        *://play.autodarts.io/*
@@ -1015,6 +1015,10 @@
                 Util.normalizeName(payload?.player_b),
                 String(payload?.score_a ?? ''),
                 String(payload?.score_b ?? ''),
+                String(payload?.sets_a ?? ''),
+                String(payload?.sets_b ?? ''),
+                String(payload?.legs_a ?? ''),
+                String(payload?.legs_b ?? ''),
             ].join('|');
         },
 
@@ -1049,17 +1053,26 @@
         },
 
         extractScoresAndAverages(text) {
-            const legsMatch =
-                text.match(/(?:Gewonnene\s+Legs|Won\s+Legs)\s+(\d+)\s+(\d+)/i) ||
-                text.match(/(?:Legs\s+Won)\s+(\d+)\s+(\d+)/i) ||
-                text.match(/\b(\d+)\s*[:\-]\s*(\d+)\b/);
+            const setsMatch =
+                text.match(/(?:Gewonnene\s+Sets|Won\s+Sets)\s+(\d+)\s+(\d+)/i) ||
+                text.match(/(?:Sets\s+Won)\s+(\d+)\s+(\d+)/i);
 
-            if (!legsMatch) return null;
+            const explicitLegsMatch =
+                text.match(/(?:Gewonnene\s+Legs|Won\s+Legs)\s+(\d+)\s+(\d+)/i) ||
+                text.match(/(?:Legs\s+Won)\s+(\d+)\s+(\d+)/i);
+
+            const fallbackScoreMatch = text.match(/\b(\d+)\s*[:\-]\s*(\d+)\b/);
+            const primaryMatch = setsMatch || explicitLegsMatch || fallbackScoreMatch;
+            if (!primaryMatch) return null;
 
             const avgMatch = text.match(/(?:Durchschnitt|Average)\s+([\d.,]+)\s+([\d.,]+)/i);
 
-            const scoreA = Util.toNumber(legsMatch[1], NaN);
-            const scoreB = Util.toNumber(legsMatch[2], NaN);
+            const setsA = setsMatch ? Util.toNumber(setsMatch[1], NaN) : null;
+            const setsB = setsMatch ? Util.toNumber(setsMatch[2], NaN) : null;
+            const legsA = explicitLegsMatch ? Util.toNumber(explicitLegsMatch[1], NaN) : null;
+            const legsB = explicitLegsMatch ? Util.toNumber(explicitLegsMatch[2], NaN) : null;
+            const scoreA = Util.toNumber(primaryMatch[1], NaN);
+            const scoreB = Util.toNumber(primaryMatch[2], NaN);
             const avgA = avgMatch ? Util.toNumber(avgMatch[1], NaN) : null;
             const avgB = avgMatch ? Util.toNumber(avgMatch[2], NaN) : null;
 
@@ -1068,6 +1081,10 @@
             return {
                 scoreA,
                 scoreB,
+                setsA: Number.isFinite(setsA) ? setsA : null,
+                setsB: Number.isFinite(setsB) ? setsB : null,
+                legsA: Number.isFinite(legsA) ? legsA : null,
+                legsB: Number.isFinite(legsB) ? legsB : null,
                 avgA: Number.isFinite(avgA) ? avgA : null,
                 avgB: Number.isFinite(avgB) ? avgB : null,
             };
@@ -1106,6 +1123,10 @@
                 player_b: playerB,
                 score_a: scoreData.scoreA,
                 score_b: scoreData.scoreB,
+                sets_a: scoreData.setsA,
+                sets_b: scoreData.setsB,
+                legs_a: scoreData.legsA,
+                legs_b: scoreData.legsB,
                 avg_a: scoreData.avgA,
                 avg_b: scoreData.avgB,
                 winner,
@@ -1126,6 +1147,10 @@
             Util.log('DEBUG score detection', {
                 score_a: payload.score_a,
                 score_b: payload.score_b,
+                sets_a: payload.sets_a,
+                sets_b: payload.sets_b,
+                legs_a: payload.legs_a,
+                legs_b: payload.legs_b,
                 avg_a: payload.avg_a,
                 avg_b: payload.avg_b,
             });
