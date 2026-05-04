@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TripleCore Overlay Bridge
 // @namespace    triplecore
-// @version      8.0.8
+// @version      8.0.9
 // @description  TripleCore Overlay Bridge für Autodarts (ToS-safe, modular, clean rebuild)
 // @author       TripleCore
 // @match        *://play.autodarts.io/*
@@ -1282,38 +1282,66 @@
             style.textContent = `
                 #triplecore-overlay-v810{
                     position:fixed;
-                    left:50%;
+                    right:16px;
                     bottom:16px;
-                    transform:translateX(-50%);
-                    opacity: 0.75;
-                    width:min(860px,calc(100vw - 20px));
+                    width:min(760px,calc(100vw - 24px));
+                    max-height:min(82vh,720px);
                     z-index:2147483647;
                     font-family:Inter,Segoe UI,Arial,sans-serif;
                     color:#e8f1ff;
-                    background:rgba(15,25,35,.75);
-                    border:1px solid rgba(255,255,255,.1);
-                    border-radius:18px;
-                    box-shadow:0 14px 40px rgba(0,0,0,.4),0 0 22px rgba(95,161,255,.2);
-                    backdrop-filter:blur(14px);
+                    background:linear-gradient(145deg,rgba(13,22,32,.94),rgba(19,34,45,.9));
+                    border:1px solid rgba(255,255,255,.12);
+                    border-radius:16px;
+                    box-shadow:0 18px 42px rgba(0,0,0,.42),0 0 24px rgba(95,161,255,.18);
+                    backdrop-filter:blur(16px);
                     overflow:hidden;
+                    opacity:.94;
+                    transform-origin:right bottom;
+                    transition:width .22s ease,height .22s ease,max-height .22s ease,opacity .18s ease,transform .18s ease,border-radius .18s ease;
+                }
+                #triplecore-overlay-v810.is-collapsed{
+                    width:76px;
+                    height:60px;
+                    max-height:60px;
+                    border-radius:18px;
+                    opacity:.84;
+                }
+                #triplecore-overlay-v810.is-collapsed:hover{
+                    opacity:1;
+                    transform:translate(-3px,-3px);
                 }
                 #triplecore-overlay-v810 .tc-header{
                     display:flex;
-                    align-items:flex-start;
+                    align-items:center;
                     justify-content:space-between;
                     gap:12px;
-                    padding:2px 12px 4px;
+                    min-height:46px;
+                    padding:8px 10px 7px 12px;
                     border-bottom:1px solid rgba(255,255,255,.08);
+                }
+                #triplecore-overlay-v810.is-collapsed .tc-header{
+                    min-height:60px;
+                    padding:0;
+                    border-bottom:0;
+                }
+                #triplecore-overlay-v810 .tc-header-main{
+                    min-width:0;
+                    flex:1;
+                }
+                #triplecore-overlay-v810.is-collapsed .tc-header-main{
+                    display:none;
                 }
                 #triplecore-overlay-v810 .tc-title{
                     margin:0;
-                    font-size:15px;
+                    display:inline-flex;
+                    align-items:center;
+                    gap:7px;
+                    font-size:14px;
                     font-weight:700;
-                    letter-spacing:.3px;
+                    letter-spacing:0;
                 }
                 #triplecore-overlay-v810 .tc-subtitle{
-                    margin:6px 0 8px;
-                    padding:4px;
+                    margin-left:6px;
                     font-size:11px;
                     opacity:.75;
                 }
@@ -1354,20 +1382,60 @@
                     display:inline-flex;
                     align-items:center;
                     justify-content:center;
-                    width:22px;
-                    height:22px;
+                    flex:0 0 auto;
+                    width:34px;
+                    height:34px;
                     border:1px solid rgba(255,255,255,.16);
-                    border-radius:10px;
-                    background:rgba(255,255,255,.04);
+                    border-radius:12px;
+                    background:rgba(255,255,255,.07);
                     color:#fff;
                     cursor:pointer;
-                    font-size:15px;
+                    font-size:14px;
+                    font-weight:800;
+                    line-height:1;
+                    transition:background .16s ease,transform .16s ease,border-color .16s ease;
+                }
+                #triplecore-overlay-v810 .tc-collapse:hover{
+                    background:rgba(95,161,255,.24);
+                    border-color:rgba(95,161,255,.48);
+                }
+                #triplecore-overlay-v810.is-collapsed .tc-collapse{
+                    width:100%;
+                    height:60px;
+                    border:0;
+                    border-radius:18px;
+                    background:linear-gradient(145deg,rgba(15,132,255,.78),rgba(48,188,164,.68));
+                    box-shadow:inset 0 1px 0 rgba(255,255,255,.18);
+                    flex-direction:column;
+                    gap:3px;
+                }
+                #triplecore-overlay-v810 .tc-collapse-main{
+                    display:block;
+                    font-size:13px;
+                }
+                #triplecore-overlay-v810 .tc-collapse-sub{
+                    display:none;
+                    font-size:9px;
+                    font-weight:700;
+                    opacity:.86;
+                    max-width:62px;
+                    overflow:hidden;
+                    text-overflow:ellipsis;
+                    white-space:nowrap;
+                }
+                #triplecore-overlay-v810.is-collapsed .tc-collapse-main{
+                    font-size:18px;
+                    letter-spacing:0;
+                }
+                #triplecore-overlay-v810.is-collapsed .tc-collapse-sub{
+                    display:block;
                 }
                 #triplecore-overlay-v810 .tc-body{
                     padding:8px 10px;
                     display:grid;
                     grid-template-columns:repeat(3,minmax(0,1fr));
                     gap:10px;
+                    overflow:auto;
                 }
                 #triplecore-overlay-v810 .tc-card{
                     min-height:100%;
@@ -1431,6 +1499,20 @@
                 #triplecore-overlay-v810 .tc-btn--primary{background:linear-gradient(135deg,#0f84ff,#5fa1ff);}
                 #triplecore-overlay-v810 .tc-btn--secondary{background:rgba(95,161,255,.22);border:1px solid rgba(95,161,255,.45);}
                 @media (max-width:900px){
+                    #triplecore-overlay-v810{
+                        right:10px;
+                        bottom:10px;
+                        width:calc(100vw - 20px);
+                        max-height:75vh;
+                    }
+                    #triplecore-overlay-v810.is-collapsed{
+                        width:72px;
+                        height:56px;
+                        max-height:56px;
+                    }
+                    #triplecore-overlay-v810.is-collapsed .tc-collapse{
+                        height:56px;
+                    }
                     #triplecore-overlay-v810 .tc-body{grid-template-columns:1fr;}
                 }
             `;
@@ -1461,13 +1543,16 @@
             const settings = Storage.getContext()?.settings || State.lastLobbyPayload?.settings || null;
 
             root.innerHTML = '';
+            root.className = State.collapsed ? 'is-collapsed' : 'is-expanded';
 
             const header = document.createElement('div');
             header.className = 'tc-header';
             header.innerHTML = `
-                <div>
-                        <span class="tc-title">TripleCore Overlay</span>
-                        <span class="tc-subtitle">Bridge Monitor • V7 Style</span>
+                <div class="tc-header-main">
+                    <div>
+                        <span class="tc-title">TripleCore Overlay</span><span class="tc-subtitle">Bridge Monitor</span>
+                    </div>
+                    <div class="tc-chips">
                         <span class="tc-chip">API: ${State.authToken ? 'OK' : 'Fehlt'}</span>
                         <span class="tc-chip">Modus: ${modeLabel}</span>
                         <span class="tc-chip">Status: ${State.statusText || 'Bereit'}</span>
@@ -1475,7 +1560,10 @@
                         <button id="tc-update-chip" class="${UpdateCheck.getChipClassName()} tc-chip--button" type="button" title="Update-Status prüfen/öffnen">Update: ${State.updateStatus}</button>
                     </div>
                 </div>
-                <button id="tc-collapse" class="tc-collapse">${State.collapsed ? '▴' : '▾'}</button>
+                <button id="tc-collapse" class="tc-collapse" type="button" title="${State.collapsed ? 'TripleCore Overlay öffnen' : 'TripleCore Overlay schließen'}">
+                    <span class="tc-collapse-main">${State.collapsed ? 'TC' : 'x'}</span>
+                    <span class="tc-collapse-sub">${modeLabel}</span>
+                </button>
             `;
             root.appendChild(header);
 
@@ -1491,7 +1579,6 @@
 
             const body = document.createElement('div');
             body.className = 'tc-body';
-            body.style.display = State.collapsed ? 'none' : 'grid';
             body.innerHTML = `
                 <section class="tc-card">
                     <p class="tc-card-title">Core Infos</p>
@@ -1515,7 +1602,7 @@
                     <div class="tc-row"><span class="tc-label">In/Out</span><span class="tc-value">${settings.in_mode || '–'} / ${settings.out_mode || '–'}</span></div>
                 </section>` : ''}
             `;
-            root.appendChild(body);
+            if (!State.collapsed) root.appendChild(body);
 
             const footer = document.createElement('div');
             footer.className = 'tc-footer';
@@ -1524,7 +1611,7 @@
                 <button id="tc-send-result" class="tc-btn tc-btn--primary">Ergebnis senden</button>
                 ${lobbyId !== '–' ? '<button id="tc-send-lobby" class="tc-btn tc-btn--secondary">Lobby senden</button>' : ''}
             `;
-            root.appendChild(footer);
+            if (!State.collapsed) root.appendChild(footer);
 
             footer.querySelector('#tc-toggle-mode')?.addEventListener('click', () => {
                 State.mode = State.mode === 'league' ? 'casual' : 'league';
