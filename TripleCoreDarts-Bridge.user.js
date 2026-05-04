@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TripleCore Overlay Bridge
 // @namespace    triplecore
-// @version      8.0.7
+// @version      8.0.8
 // @description  TripleCore Overlay Bridge für Autodarts (ToS-safe, modular, clean rebuild)
 // @author       TripleCore
 // @match        *://play.autodarts.io/*
@@ -1135,6 +1135,8 @@
                 detected_mode: context?.settings?.game_mode || null,
                 detected_start_points: context?.settings?.start_points || null,
                 detected_ft: context?.settings?.target_wins || null,
+                detected_sets: context?.settings?.sets || null,
+                detected_legs: context?.settings?.legs || null,
             };
 
             Util.log('DEBUG final result payload', payload);
