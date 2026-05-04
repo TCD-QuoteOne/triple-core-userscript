@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TripleCore Overlay Bridge
 // @namespace    triplecore
-// @version      8.0.10
+// @version      8.1.0
 // @description  TripleCore Overlay Bridge für Autodarts (ToS-safe, modular, clean rebuild)
 // @author       TripleCore
 // @match        *://play.autodarts.io/*
@@ -12,7 +12,7 @@
 
 (function () {
     'use strict';
-    const USERSCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info?.script?.version) || '8.0.2';
+    const USERSCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info?.script?.version) || '8.1.0';
     const USERSCRIPT_UPDATE_URL = 'https://raw.githubusercontent.com/TCD-QuoteOne/triple-core-userscript/main/TripleCoreDarts-Bridge.user.js';
 
     /* ========================================
@@ -1409,6 +1409,10 @@
                     flex-direction:column;
                     gap:3px;
                 }
+                #triplecore-overlay-v810.is-collapsed.is-update-available .tc-collapse{
+                    background:linear-gradient(145deg,rgba(210,55,65,.9),rgba(145,36,58,.82));
+                    box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 0 22px rgba(210,55,65,.34);
+                }
                 #triplecore-overlay-v810 .tc-collapse-main{
                     display:block;
                     font-size:13px;
@@ -1543,7 +1547,11 @@
             const settings = Storage.getContext()?.settings || State.lastLobbyPayload?.settings || null;
 
             root.innerHTML = '';
-            root.className = State.collapsed ? 'is-collapsed' : 'is-expanded';
+            root.className = [
+                State.collapsed ? 'is-collapsed' : 'is-expanded',
+                State.updateAvailable ? 'is-update-available' : '',
+            ].filter(Boolean).join(' ');
+            const collapsedDockLabel = State.updateAvailable ? 'Update' : modeLabel;
 
             const header = document.createElement('div');
             header.className = 'tc-header';
@@ -1562,7 +1570,7 @@
                 </div>
                 <button id="tc-collapse" class="tc-collapse" type="button" title="${State.collapsed ? 'TripleCore Overlay öffnen' : 'TripleCore Overlay schließen'}">
                     <span class="tc-collapse-main">${State.collapsed ? 'TC' : 'x'}</span>
-                    <span class="tc-collapse-sub">${modeLabel}</span>
+                    <span class="tc-collapse-sub">${collapsedDockLabel}</span>
                 </button>
             `;
             root.appendChild(header);
