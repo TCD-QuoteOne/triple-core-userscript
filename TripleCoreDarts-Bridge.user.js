@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TripleCore Overlay Bridge
 // @namespace    triplecore
-// @version      8.1.0
+// @version      8.1.1
 // @description  TripleCore Overlay Bridge für Autodarts (ToS-safe, modular, clean rebuild)
 // @author       TripleCore
 // @match        *://play.autodarts.io/*
@@ -12,7 +12,7 @@
 
 (function () {
     'use strict';
-    const USERSCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info?.script?.version) || '8.1.0';
+    const USERSCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info?.script?.version) || '8.1.1';
     const USERSCRIPT_UPDATE_URL = 'https://raw.githubusercontent.com/TCD-QuoteOne/triple-core-userscript/main/TripleCoreDarts-Bridge.user.js';
 
     /* ========================================
@@ -54,6 +54,7 @@
 
         AUTO_SEND_RESULTS: true,
         DEBUG: true,
+        FAKE_UPDATE_AVAILABLE: true,
     };
 
     const State = {
@@ -190,6 +191,15 @@
         },
 
         async checkForUserscriptUpdate() {
+            if (CONFIG.FAKE_UPDATE_AVAILABLE) {
+                State.latestVersion = '9.9.9';
+                State.updateAvailable = true;
+                State.updateCheckFailed = false;
+                State.updateStatus = 'Update';
+                Overlay.render();
+                return;
+            }
+
             try {
                 State.updateStatus = 'Prüfe…';
                 State.updateCheckFailed = false;
