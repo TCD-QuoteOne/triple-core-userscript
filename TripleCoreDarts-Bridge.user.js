@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TripleCore Overlay Bridge
 // @namespace    triplecore
-// @version      8.0.9
+// @version      8.0.10
 // @description  TripleCore Overlay Bridge für Autodarts (ToS-safe, modular, clean rebuild)
 // @author       TripleCore
 // @match        *://play.autodarts.io/*
@@ -1283,7 +1283,7 @@
                 #triplecore-overlay-v810{
                     position:fixed;
                     right:16px;
-                    bottom:16px;
+                    bottom:calc(16px + 2cm);
                     width:min(760px,calc(100vw - 24px));
                     max-height:min(82vh,720px);
                     z-index:2147483647;
@@ -1501,7 +1501,7 @@
                 @media (max-width:900px){
                     #triplecore-overlay-v810{
                         right:10px;
-                        bottom:10px;
+                        bottom:calc(10px + 2cm);
                         width:calc(100vw - 20px);
                         max-height:75vh;
                     }
