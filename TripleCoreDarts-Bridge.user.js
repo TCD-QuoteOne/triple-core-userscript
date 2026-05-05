@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TripleCore Overlay Bridge
 // @namespace    triplecore
-// @version      8.1.0
+// @version      8.1.1
 // @description  TripleCore Overlay Bridge für Autodarts (ToS-safe, modular, clean rebuild)
 // @author       TripleCore
 // @match        *://play.autodarts.io/*
@@ -602,6 +602,8 @@
             }
 
             State.activeSeasonMatchId = seasonMatchId;
+            State.mode = 'league';
+            Storage.saveUiState();
             Storage.saveContext({
                 source: 'discord_match_open_link',
                 job_type: 'league_match',
@@ -627,6 +629,43 @@
         normalizeGameMode(raw) {
             const value = String(raw || '').toLowerCase();
             return value.includes('set') ? 'sets' : 'legs';
+        },
+
+        normalizeGameType(raw) {
+            const value = String(raw || '').trim().toLowerCase();
+            if (!value) return null;
+            if (value.includes('cricket')) return 'cricket';
+            if (value.includes('around') || value.includes('clock') || value === 'atc') return 'around_the_clock';
+            if (value.includes('x01') || /\b(101|201|301|401|501|701|901|1001)\b/.test(value)) return 'x01';
+            return null;
+        },
+
+        detectGameType(lobbyData, text = '') {
+            const src = lobbyData?.settings || lobbyData?.config || lobbyData?.options || lobbyData?.ruleSet || {};
+            const candidates = [
+                lobbyData?.gameType,
+                lobbyData?.game_type,
+                lobbyData?.variant,
+                lobbyData?.type,
+                lobbyData?.mode,
+                lobbyData?.name,
+                src.gameType,
+                src.game_type,
+                src.variant,
+                src.type,
+                text,
+            ];
+            for (const candidate of candidates) {
+                const normalized = LobbyParser.normalizeGameType(candidate);
+                if (normalized) return normalized;
+            }
+            if (src.baseScore || src.start_points || src.startPoints || src.x01 || lobbyData?.start_points) return 'x01';
+            if (/\/lobbies\/new\/x01/i.test(location.pathname + location.search)) return 'x01';
+            return null;
+        },
+
+        isClassicX01(gameType) {
+            return LobbyParser.normalizeGameType(gameType) === 'x01';
         },
 
         normalizeStartPoints(raw) {
@@ -658,6 +697,7 @@
 
         parseLobbySettings(lobbyData) {
             const src = lobbyData?.settings || lobbyData?.config || lobbyData?.options || lobbyData?.ruleSet || {};
+            const gameType = LobbyParser.detectGameType(lobbyData);
 
             const startPoints = src.baseScore ?? src.start_points ?? src.startPoints ?? src.x01 ?? lobbyData?.start_points;
             const inMode = src.inMode ?? src.in_mode ?? src.in;
@@ -682,6 +722,7 @@
                 bull_mode: LobbyParser.normalizeBullMode(bullMode),
                 bull_off: String(bullOff || '').toLowerCase() || null,
                 max_rounds: Util.toNumber(src.maxRounds ?? src.max_rounds ?? src.rounds ?? 0, 0) || null,
+                game_type: gameType || 'x01',
                 game_mode: gameMode,
                 target_wins: targetWins,
                 sets: gameMode === 'sets' ? (targetWins || sets || 0) : 0,
@@ -691,6 +732,7 @@
 
             Util.log('DEBUG parsed lobby settings', {
                 start_points: parsedSettings.start_points,
+                game_type: parsedSettings.game_type,
                 game_mode: parsedSettings.game_mode,
                 target_wins: parsedSettings.target_wins,
                 sets: parsedSettings.sets,
@@ -747,6 +789,7 @@
                 start_points: LobbyParser.normalizeStartPoints(
                     pickNumber(lobbyParsed.start_points, job.start_points, season.start_points, 501)
                 ) || 501,
+                game_type: LobbyParser.normalizeGameType(pickString(lobbyParsed.game_type, job.game_type, season.game_type, 'x01')) || 'x01',
                 game_mode: resolvedMode,
                 target_wins: resolvedTargetWins,
                 sets: resolvedSets,
@@ -875,6 +918,11 @@
             const activeJob = State.mode === 'league' ? leagueJob : casualJob;
             const seasonRules = context?.rules && typeof context.rules === 'object' ? context.rules : (leagueJob?.settings || {});
             const mergedSettings = LobbyParser.resolveFinalSettings(seasonRules, lobbyData, activeJob?.settings || {});
+            if (!LobbyParser.isClassicX01(mergedSettings.game_type)) {
+                Util.status(`Nicht-X01-Lobby erkannt (${mergedSettings.game_type || 'unbekannt'}) – wird nicht gesendet`);
+                Util.warn('Non-X01 lobby blocked', { lobbyId, game_type: mergedSettings.game_type, lobbyData });
+                return;
+            }
 
             const leagueContext = context && (String(context?.job_type || '').toLowerCase() === 'league_match' || !!context?.season_match_id) ? context : null;
             const leagueContextMeta = getLeagueContextMeta(leagueContext);
@@ -1133,11 +1181,17 @@
                 is_bot_match: ResultParser.isBotName(playerA) || ResultParser.isBotName(playerB),
 
                 detected_mode: context?.settings?.game_mode || null,
+                game_type: context?.settings?.game_type || LobbyParser.detectGameType(null, `${title}\n${text}`) || 'x01',
                 detected_start_points: context?.settings?.start_points || null,
                 detected_ft: context?.settings?.target_wins || null,
                 detected_sets: context?.settings?.sets || null,
                 detected_legs: context?.settings?.legs || null,
             };
+            if (!LobbyParser.isClassicX01(payload.game_type)) {
+                Util.status(`Nicht-X01-Ergebnis erkannt (${payload.game_type || 'unbekannt'}) – wird nicht gesendet`);
+                Util.warn('Non-X01 result blocked', { matchId, game_type: payload.game_type, title });
+                return null;
+            }
 
             Util.log('DEBUG final result payload', payload);
             Util.log('DEBUG player detection', {
