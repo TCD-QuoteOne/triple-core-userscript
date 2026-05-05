@@ -957,7 +957,7 @@
                 season_id: Util.asOptionalString(leagueJob?.season_id || ((State.mode === 'league' && leagueContextMeta.expired) ? null : context?.season_id)),
                 matchday_id: Util.asOptionalString(leagueJob?.matchday_id || ((State.mode === 'league' && leagueContextMeta.expired) ? null : context?.matchday_id)),
                 job_id: Util.asOptionalString(leagueJob?.id || casualJob?.id || ((State.mode === 'league' && leagueContextMeta.expired) ? null : context?.job_id)),
-                job_type: State.mode === 'league' ? 'league_match' : 'lfg',
+                job_type: State.mode === 'league' ? 'league_match' : 'casual',
 
                 settings: mergedSettings,
             };
@@ -1011,7 +1011,7 @@
                 season_match_id: payload.season_match_id,
                 season_id: payload.season_id,
                 matchday_id: payload.matchday_id,
-                job_type: payload.job_type || (payload.mode === 'league' ? 'league_match' : 'lfg'),
+                job_type: payload.job_type || (payload.mode === 'league' ? 'league_match' : 'casual'),
                 settings: payload.settings,
                 mode: State.mode,
                 activated_at: context?.activated_at || Util.nowIso(),
@@ -1708,7 +1708,7 @@
                 State.activeSeasonMatchId = String(State.openLeagueJob.season_match_id);
             }
 
-            const casualNext = await ApiBridge.tcGet(`/api/jobs/next?autodarts_name=${encodeURIComponent(autodartsName)}&job_type=lfg`).catch(() => null);
+            const casualNext = await ApiBridge.tcGet(`/api/jobs/next?autodarts_name=${encodeURIComponent(autodartsName)}&job_type=casual`).catch(() => null);
             State.openCasualJob = casualNext?.found ? casualNext.job : null;
 
             const context = Storage.getContext();
