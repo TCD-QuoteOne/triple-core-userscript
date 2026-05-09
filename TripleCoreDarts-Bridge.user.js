@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TripleCore Overlay Bridge
 // @namespace    triplecore
-// @version      8.1.4
+// @version      8.1.5
 // @description  TripleCore Overlay Bridge für Autodarts (ToS-safe, modular, clean rebuild)
 // @author       TripleCore
 // @match        *://play.autodarts.io/*
@@ -12,7 +12,7 @@
 
 (function () {
     'use strict';
-    const USERSCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info?.script?.version) || '8.1.4';
+    const USERSCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info?.script?.version) || '8.1.5';
     const USERSCRIPT_UPDATE_URL = 'https://raw.githubusercontent.com/TCD-QuoteOne/triple-core-userscript/main/TripleCoreDarts-Bridge.user.js';
 
     /* ========================================
@@ -1056,14 +1056,21 @@
                 const { playerCount, maxPlayers } = LobbyFlow.extractLobbyCounts(lobbyData);
                 const status = playerCount >= maxPlayers ? 'full' : 'waiting_players';
 
-                await ApiBridge.tcPost(`/api/jobs/${activeJob.id}/sync`, {
+                const syncResponse = await ApiBridge.tcPost(`/api/jobs/${activeJob.id}/sync`, {
                     lobby_id: lobbyId,
+                    invite: Util.buildLobbyUrl(lobbyId),
                     player_count: playerCount,
                     max_players: maxPlayers,
                     status,
                 });
+                if (syncResponse?.job) {
+                    if (State.mode === 'league') State.openLeagueJob = syncResponse.job;
+                    else State.openCasualJob = syncResponse.job;
+                }
+                Util.status(`Lobby gesendet (${lobbyId})`);
             } catch (err) {
                 Util.warn('Lobby sync failed', err);
+                Util.status(`Lobby-Sync fehlgeschlagen: ${String(err?.message || err)}`);
             } finally {
                 State.syncingLobby = false;
             }
