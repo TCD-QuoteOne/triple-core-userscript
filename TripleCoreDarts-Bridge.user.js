@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TripleCore Overlay Bridge
 // @namespace    triplecore
-// @version      8.1.3
+// @version      8.1.4
 // @description  TripleCore Overlay Bridge für Autodarts (ToS-safe, modular, clean rebuild)
 // @author       TripleCore
 // @match        *://play.autodarts.io/*
@@ -12,7 +12,7 @@
 
 (function () {
     'use strict';
-    const USERSCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info?.script?.version) || '8.1.3';
+    const USERSCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info?.script?.version) || '8.1.4';
     const USERSCRIPT_UPDATE_URL = 'https://raw.githubusercontent.com/TCD-QuoteOne/triple-core-userscript/main/TripleCoreDarts-Bridge.user.js';
 
     /* ========================================
@@ -952,6 +952,9 @@
                 return;
             }
 
+            const resolvedJobId = State.mode === 'league'
+                ? (leagueJob?.id || context?.job_id || null)
+                : (casualJob?.id || null);
             const payload = {
                 creator: autodartsName || 'unknown',
                 client_id: CLIENT_ID,
@@ -967,7 +970,7 @@
                 season_match_id: Util.asOptionalString(State.activeSeasonMatchId || leagueJob?.season_match_id || ((State.mode === 'league' && leagueContextMeta.expired) ? null : context?.season_match_id)),
                 season_id: Util.asOptionalString(leagueJob?.season_id || ((State.mode === 'league' && leagueContextMeta.expired) ? null : context?.season_id)),
                 matchday_id: Util.asOptionalString(leagueJob?.matchday_id || ((State.mode === 'league' && leagueContextMeta.expired) ? null : context?.matchday_id)),
-                job_id: Util.asOptionalString(leagueJob?.id || casualJob?.id || ((State.mode === 'league' && leagueContextMeta.expired) ? null : context?.job_id)),
+                job_id: Util.asOptionalString((State.mode === 'league' && leagueContextMeta.expired) ? null : resolvedJobId),
                 job_type: State.mode === 'league' ? 'league_match' : 'casual',
 
                 settings: mergedSettings,
@@ -996,6 +999,10 @@
                     return;
                 }
             }
+            const attachedJob = bridgeResponse?.job && typeof bridgeResponse.job === 'object' ? bridgeResponse.job : null;
+            if (State.mode === 'league' && attachedJob?.id) {
+                State.openLeagueJob = attachedJob;
+            }
 
             if (leagueJob?.id) {
                 ApiBridge.tcPost(`/api/jobs/${leagueJob.id}/lobby`, {
@@ -1017,7 +1024,7 @@
 
             Storage.saveContext({
                 ...(context || {}),
-                job_id: payload.job_id,
+                job_id: payload.job_id || attachedJob?.id || null,
                 lobby_id: lobbyId,
                 season_match_id: payload.season_match_id,
                 season_id: payload.season_id,
@@ -1713,8 +1720,16 @@
             const seasonData = await ApiBridge.tcGet('/api/season').catch(() => null);
             State.activeSeason = seasonData?.active_season || null;
 
-            const leagueNext = await ApiBridge.tcGet(`/api/jobs/next?autodarts_name=${encodeURIComponent(autodartsName)}&job_type=league_match`).catch(() => null);
-            State.openLeagueJob = leagueNext?.found ? leagueNext.job : null;
+            const context = Storage.getContext();
+            const contextMatchId = String(context?.season_match_id || '').trim();
+            const leagueNext = contextMatchId
+                ? await ApiBridge.tcGet(`/api/jobs/next?season_match_id=${encodeURIComponent(contextMatchId)}&job_type=league_match`).catch(() => null)
+                : await ApiBridge.tcGet(`/api/jobs/next?autodarts_name=${encodeURIComponent(autodartsName)}&job_type=league_match`).catch(() => null);
+            const leagueFallback = (!leagueNext?.found && contextMatchId)
+                ? await ApiBridge.tcGet(`/api/jobs/next?autodarts_name=${encodeURIComponent(autodartsName)}&job_type=league_match`).catch(() => null)
+                : null;
+            const resolvedLeagueNext = leagueNext?.found ? leagueNext : leagueFallback;
+            State.openLeagueJob = resolvedLeagueNext?.found ? resolvedLeagueNext.job : null;
             if (State.openLeagueJob?.season_match_id) {
                 State.activeSeasonMatchId = String(State.openLeagueJob.season_match_id);
             }
@@ -1722,7 +1737,6 @@
             const casualNext = await ApiBridge.tcGet(`/api/jobs/next?autodarts_name=${encodeURIComponent(autodartsName)}&job_type=casual`).catch(() => null);
             State.openCasualJob = casualNext?.found ? casualNext.job : null;
 
-            const context = Storage.getContext();
             const leagueContextActive = String(context?.job_type || '').toLowerCase() === 'league_match' || !!context?.season_match_id;
             const contextMeta = getLeagueContextMeta(context);
             if (leagueContextActive && contextMeta.expired) {
